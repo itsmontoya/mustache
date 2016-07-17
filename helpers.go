@@ -1,8 +1,6 @@
 package mustache
 
-import (
-	"strconv"
-)
+import "strconv"
 
 func isChar(b byte) bool {
 	return (b >= lwrCaseStart && b <= lwrCaseEnd) || (b >= uprCaseStart && b <= uprCaseEnd)
@@ -14,15 +12,15 @@ func isWhiteSpace(b byte) bool {
 
 // Aficionado is someone who really appreciates the Mustache
 type Aficionado interface {
-	MarshalMustache(*parser) error
+	MarshalMustache(*Renderer) error
 }
 
 // StringMap is a common map[string]string, has the func needed to be an Aficionado
 type StringMap map[string]string
 
 // MarshalMustache is what makes us one of the best, baby!
-func (m StringMap) MarshalMustache(p *parser) (err error) {
-	p.ForEach(m.Get)
+func (m StringMap) MarshalMustache(r *Renderer) (err error) {
+	r.ForEach(m.Get)
 	return
 }
 
@@ -35,8 +33,8 @@ func (m StringMap) Get(key string) (val interface{}) {
 type InterfaceMap map[string]interface{}
 
 // MarshalMustache is what makes us one of the best, baby!
-func (m InterfaceMap) MarshalMustache(p *parser) (err error) {
-	p.ForEach(m.Get)
+func (m InterfaceMap) MarshalMustache(r *Renderer) (err error) {
+	r.ForEach(m.Get)
 	return
 }
 
@@ -45,7 +43,7 @@ func (m InterfaceMap) Get(key string) (val interface{}) {
 	return m[key]
 }
 
-func handleValue(v interface{}) (b []byte, ok bool) {
+func getValueBytes(v interface{}) (b []byte, ok bool) {
 	ok = true
 	switch nv := v.(type) {
 	case []byte:
@@ -61,36 +59,51 @@ func handleValue(v interface{}) (b []byte, ok bool) {
 	default:
 		ok = false
 	}
+	return
+
+}
+
+func getAficionado(pa Aficionado, v interface{}) (a Aficionado, ok bool) {
+	ok = true
+	switch nv := v.(type) {
+	case Aficionado:
+		a = nv
+	case bool:
+		if nv {
+			a = pa
+		}
+	case map[string]string:
+		a = StringMap(nv)
+	case map[string]interface{}:
+		a = InterfaceMap(nv)
+
+	default:
+		ok = false
+	}
 
 	return
 }
 
-func handleSection(a Aficionado, tmpl []byte, v interface{}) (bs []byte, ok bool) {
+func getAficionados(pa Aficionado, v interface{}) (as []Aficionado, ok bool) {
+	var a Aficionado
+	if a, ok = getAficionado(pa, v); ok {
+		as = []Aficionado{a}
+		return
+	}
+
 	ok = true
 	switch nv := v.(type) {
-	case Aficionado:
-		parse(tmpl, nv, func(b []byte) {
-			bs = make([]byte, len(b))
-			copy(bs, b)
-		})
-	case bool:
-		if nv {
-			parse(tmpl, a, func(b []byte) {
-				bs = make([]byte, len(b))
-				copy(bs, b)
-			})
-		}
-	case map[string]interface{}:
-		parse(tmpl, InterfaceMap(nv), func(b []byte) {
-			bs = make([]byte, len(b))
-			copy(bs, b)
-		})
 	case []Aficionado:
-		for _, vi := range nv {
-			parse(tmpl, vi, func(b []byte) {
-				bs = append(bs, b...)
-			})
+		as = nv
+	case []interface{}:
+		for _, i := range nv {
+			if a, ok = getAficionado(pa, i); !ok {
+				return
+			}
+
+			as = append(as, a)
 		}
+
 	default:
 		ok = false
 	}

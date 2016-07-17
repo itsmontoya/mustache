@@ -84,8 +84,8 @@ type User struct {
 	Name     string
 }
 
-func (u *User) MarshalMustache(p *parser) error {
-	p.ForEach(func(key string) (val interface{}) {
+func (u *User) MarshalMustache(r *Renderer) error {
+	r.ForEach(func(key string) (val interface{}) {
 		switch key {
 		case "greeting":
 			val = u.Greeting
@@ -95,7 +95,6 @@ func (u *User) MarshalMustache(p *parser) error {
 
 		return
 	})
-
 	return nil
 }
 
@@ -104,22 +103,43 @@ var (
 	outputStr string
 )
 
-func TestBasic(t *testing.T) {
-	if err := testSuite(); err != nil {
-		t.Error(err)
+func test(tmpl []byte, d interface{}) (err error) {
+	var t *Template
+	if t, err = Parse(tmpl); err != nil {
 		return
+	}
+
+	if err = t.Render(d, func(b []byte) {
+		fmt.Println(string(b))
+	}); err != nil {
+		return
+	}
+
+	return
+}
+
+func TestVerySimple(t *testing.T) {
+	if err := test(exampleVerySimple, m); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestSimple(t *testing.T) {
+	if err := test(exampleSimple, m); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestApprovedInjection(t *testing.T) {
+	if err := test(exampleApprovedInjection, m); err != nil {
+		t.Error(err)
 	}
 }
 
 func TestHTML(t *testing.T) {
-	if err := parse(exampleHTML, dm, func(b []byte) {
-		outputB = b
-	}); err != nil {
+	if err := test(exampleHTML, dm); err != nil {
 		t.Error(err)
-		return
 	}
-
-	fmt.Println("What do we have here?", string(outputB))
 }
 
 func TestHoisie(t *testing.T) {
@@ -132,7 +152,7 @@ func TestHoisie(t *testing.T) {
 func testSuite() (err error) {
 	var str string
 
-	if err = parse(exampleVerySimple, m, func(b []byte) {
+	if err = Render(exampleVerySimple, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -142,7 +162,7 @@ func testSuite() (err error) {
 		return errInvalidOutput
 	}
 
-	if err = parse(exampleSimple, m, func(b []byte) {
+	if err = Render(exampleSimple, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -152,7 +172,7 @@ func testSuite() (err error) {
 		return errInvalidOutput
 	}
 
-	if err = parse(exampleInjection, m, func(b []byte) {
+	if err = Render(exampleInjection, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -162,7 +182,7 @@ func testSuite() (err error) {
 		return errInvalidOutput
 	}
 
-	if err = parse(exampleApprovedInjection, m, func(b []byte) {
+	if err = Render(exampleApprovedInjection, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -172,7 +192,7 @@ func testSuite() (err error) {
 		return errInvalidOutput
 	}
 
-	if err = parse(exampleHTML, dm, func(b []byte) {
+	if err = Render(exampleHTML, dm, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -182,25 +202,25 @@ func testSuite() (err error) {
 }
 
 func runSuite() (err error) {
-	if err = parse(exampleVerySimple, m, func(b []byte) {
+	if err = Render(exampleVerySimple, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
 	}
 
-	if err = parse(exampleSimple, m, func(b []byte) {
+	if err = Render(exampleSimple, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
 	}
 
-	if err = parse(exampleInjection, m, func(b []byte) {
+	if err = Render(exampleInjection, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
 	}
 
-	if err = parse(exampleApprovedInjection, m, func(b []byte) {
+	if err = Render(exampleApprovedInjection, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -211,7 +231,7 @@ func runSuite() (err error) {
 
 func TestLong(t *testing.T) {
 	var err error
-	if err = parse(exampleLong, m, func(b []byte) {
+	if err = Render(exampleLong, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
@@ -282,7 +302,7 @@ func BenchmarkHoisieSuite(b *testing.B) {
 func BenchmarkLong(b *testing.B) {
 	var err error
 	for i := 0; i < b.N; i++ {
-		if err = parse(exampleLong, m, func(b []byte) {
+		if err = Render(exampleLong, m, func(b []byte) {
 			outputB = b
 		}); err != nil {
 			return
@@ -301,11 +321,23 @@ func BenchmarkHoisieLong(b *testing.B) {
 }
 
 func BenchmarkHTML(b *testing.B) {
-	var err error
+	b.StopTimer()
+	var (
+		tmpl *Template
+		err  error
+	)
+
+	if tmpl, err = Parse(exampleHTML); err != nil {
+		b.Error(err)
+		return
+	}
+	b.StartTimer()
+
 	for i := 0; i < b.N; i++ {
-		if err = parse(exampleHTML, dm, func(b []byte) {
+		if err = tmpl.Render(dm, func(b []byte) {
 			outputB = b
 		}); err != nil {
+			b.Error(err)
 			return
 		}
 	}

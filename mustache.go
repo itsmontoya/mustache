@@ -3,7 +3,7 @@ package mustache
 import (
 	"bytes"
 
-	"github.com/itsmontoya/escapist"
+	//"github.com/itsmontoya/escapist"
 	"github.com/missionMeteora/toolkit/bufferPool"
 	"github.com/missionMeteora/toolkit/errors"
 )
@@ -65,32 +65,40 @@ const (
 
 var bp = bufferPool.New(32)
 
-func parse(tmpl []byte, data interface{}, fn func([]byte)) error {
-	p := parser{
-		buf:  bp.Get(),
-		kbuf: bp.Get(),
+func Render(a, b, c interface{}) error {
+	return nil
+}
 
+// Parse will parse a byteslice template and return a mustache Template
+func Parse(tmpl []byte) (t *Template, err error) {
+	var tkns tokens
+	if tkns, err = parse(tmpl); err != nil {
+		return
+	}
+
+	t = &Template{
 		tmpl: tmpl,
-		rfn:  fn,
+		tkns: tkns,
 	}
 
-	switch nd := data.(type) {
-	case Aficionado:
-		p.data = nd
-	case map[string]string:
-		p.data = StringMap(nd)
-	case map[string]interface{}:
-		p.data = InterfaceMap(nd)
+	return
+}
 
-	default:
-		return ErrUnsupportedType
+func parse(tmpl []byte) (tkns tokens, err error) {
+	p := parser{
+		kbuf: bp.Get(),
+		tmpl: tmpl,
 	}
 
-	return p.data.MarshalMustache(&p)
+	if err = p.parse(); err != nil {
+		return
+	}
+
+	tkns = p.tkns
+	return
 }
 
 type parser struct {
-	buf  *bytes.Buffer
 	kbuf *bytes.Buffer
 
 	tmpl  []byte
@@ -100,9 +108,7 @@ type parser struct {
 	start  int
 	kstart int
 
-	data Aficionado
-	gfn  func(string) interface{} // Get function
-	rfn  func([]byte)             // Read function
+	tkns tokens
 }
 
 func (p *parser) parse() (err error) {
@@ -156,20 +162,15 @@ func (p *parser) parse() (err error) {
 	}
 
 	if p.start > -1 {
-		p.buf.Write(p.tmpl[p.start:])
+		p.tkns = append(p.tkns, tmplToken{
+			start: p.start,
+			end:   len(p.tmpl),
+		})
 	}
 
 END:
-	if err == nil {
-		p.rfn(p.buf.Bytes())
-	}
-
-	bp.Put(p.buf)
 	bp.Put(p.kbuf)
-
-	p.buf = nil
 	p.kbuf = nil
-	p.data = nil
 	p.tmpl = nil
 	return
 }
@@ -183,7 +184,10 @@ func (p *parser) rootStart(b byte) {
 		return
 	}
 
-	p.buf.Write(p.tmpl[p.start:p.idx])
+	p.tkns = append(p.tkns, tmplToken{
+		start: p.start,
+		end:   p.idx,
+	})
 	p.state = stateContainerStart
 }
 
@@ -240,12 +244,10 @@ func (p *parser) valueClosing(b byte, escape bool) {
 		return
 	}
 
-	if bs, ok := handleValue(p.gfn(p.kbuf.String())); ok {
-		if escape {
-			bs = escapist.Escape(bs)
-		}
-		p.buf.Write(bs)
-	}
+	p.tkns = append(p.tkns, valToken{
+		key:    p.kbuf.String(),
+		escape: escape,
+	})
 
 	p.kbuf.Reset()
 	p.start = -1
@@ -338,29 +340,32 @@ func (p *parser) sectionClosing(b byte) {
 	}
 
 	p.idx++
-	if ss, se := findSectionEnd(p.tmpl[p.idx:]); se > -1 {
-		sec := p.tmpl[p.idx : p.idx+ss]
-		p.idx += se
-		k := p.kbuf.String()
-		if bs, ok := handleSection(p.data, sec, p.gfn(k)); ok {
-			p.buf.Write(bs)
-		}
+	var ss, se int
+	if ss, se = findSectionEnd(p.tmpl[p.idx:]); se == -1 {
+		p.state = stateError
+		return
 	}
+
+	var (
+		st  *Template
+		err error
+	)
+
+	if st, err = Parse(p.tmpl[p.idx : p.idx+ss]); err != nil {
+		p.state = stateError
+		return
+	}
+
+	p.tkns = append(p.tkns, sectionToken{
+		key: p.kbuf.String(),
+		t:   st,
+	})
+	p.idx += se
 
 	p.kbuf.Reset()
 	p.start = -1
 	p.kstart = -1
 	p.state = stateRootStart
-}
-
-func (p *parser) ForEach(getFn func(string) interface{}) (err error) {
-	if p.gfn != nil {
-		return ErrForEachSet
-	}
-
-	p.gfn = getFn
-	p.parse()
-	return
 }
 
 func findSectionEnd(in []byte) (start, i int) {
