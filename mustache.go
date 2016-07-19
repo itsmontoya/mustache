@@ -1,10 +1,7 @@
 package mustache
 
 import (
-	"bytes"
-
-	//"github.com/itsmontoya/escapist"
-	"github.com/missionMeteora/toolkit/bufferPool"
+	"github.com/itsmontoya/buffer"
 	"github.com/missionMeteora/toolkit/errors"
 )
 
@@ -16,6 +13,7 @@ const (
 	charSpace   = ' '
 	charNewline = '\n'
 	charTab     = '\t'
+	charPeriod  = '.'
 
 	lwrCaseStart = 'a'
 	lwrCaseEnd   = 'z'
@@ -63,8 +61,11 @@ const (
 	ErrUnsupportedType = errors.Error("unsupported type provided")
 )
 
-var bp = bufferPool.New(32)
+var bp = buffer.NewPool(32)
 
+//var bp = newPool()
+
+// Render is a one-shot render
 func Render(a, b, c interface{}) error {
 	return nil
 }
@@ -76,11 +77,7 @@ func Parse(tmpl []byte) (t *Template, err error) {
 		return
 	}
 
-	t = &Template{
-		tmpl: tmpl,
-		tkns: tkns,
-	}
-
+	t = newTemplate(tmpl, tkns)
 	return
 }
 
@@ -99,7 +96,7 @@ func parse(tmpl []byte) (tkns tokens, err error) {
 }
 
 type parser struct {
-	kbuf *bytes.Buffer
+	kbuf *buffer.Buffer
 
 	tmpl  []byte
 	state uint8
@@ -217,6 +214,7 @@ func (p *parser) containerOpen(b byte) {
 func (p *parser) valueOpen(b byte) {
 	switch {
 	case isChar(b):
+	case b == charPeriod:
 	case isWhiteSpace(b):
 		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
 		p.state = stateValueEnd
@@ -269,6 +267,7 @@ func (p *parser) unescapedValueStart(b byte) {
 func (p *parser) unescapedValueOpen(b byte) {
 	switch {
 	case isChar(b):
+	case b == charPeriod:
 	case isWhiteSpace(b):
 		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
 		p.state = stateUnescapedValueEnd
@@ -300,7 +299,7 @@ func (p *parser) unescapedValueClosing(b byte) {
 
 func (p *parser) sectionStart(b byte) {
 	switch {
-	case isChar(b):
+	case isChar(b), b == charPeriod:
 		p.state = stateSectionOpen
 		p.kstart = p.idx
 	case isWhiteSpace(b):
@@ -312,6 +311,7 @@ func (p *parser) sectionStart(b byte) {
 func (p *parser) sectionOpen(b byte) {
 	switch {
 	case isChar(b):
+	case b == charPeriod:
 	case isWhiteSpace(b):
 		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
 		p.state = stateSectionEnd
@@ -399,9 +399,8 @@ func findSectionEnd(in []byte) (start, i int) {
 			}
 
 		case 3:
-			if isChar(b) {
+			if isChar(b) || b == charPeriod {
 				state = 4
-				//	start = i
 			} else if !isWhiteSpace(b) {
 				state = 0
 			}

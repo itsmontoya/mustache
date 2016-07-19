@@ -43,6 +43,20 @@ func (m InterfaceMap) Get(key string) (val interface{}) {
 	return m[key]
 }
 
+// BytesMap is a common map[string][]byte, has the func needed to be an Aficionado
+type BytesMap map[string][]byte
+
+// MarshalMustache is what makes us one of the best, baby!
+func (m BytesMap) MarshalMustache(r *Renderer) (err error) {
+	r.ForEach(m.Get)
+	return
+}
+
+// Get will get a value by key
+func (m BytesMap) Get(key string) (val interface{}) {
+	return m[key]
+}
+
 func getValueBytes(v interface{}) (b []byte, ok bool) {
 	ok = true
 	switch nv := v.(type) {
@@ -76,6 +90,8 @@ func getAficionado(pa Aficionado, v interface{}) (a Aficionado, ok bool) {
 		a = StringMap(nv)
 	case map[string]interface{}:
 		a = InterfaceMap(nv)
+	case map[string][]byte:
+		a = BytesMap(nv)
 
 	default:
 		ok = false
