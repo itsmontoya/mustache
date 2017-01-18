@@ -218,19 +218,21 @@ func (p *parser) rootStart(b byte) {
 		return
 	}
 
-	p.tkns = append(p.tkns, tmplToken{
-		start: p.start,
-		end:   p.idx,
-	})
 	p.state = stateContainerStart
 }
 
 func (p *parser) containerStart(b byte) {
-	if b == charLCurly {
-		p.state = stateContainerOpen
-	} else {
+	if b != charLCurly {
 		p.state = stateRootStart
+		return
 	}
+
+	p.tkns = append(p.tkns, tmplToken{
+		start: p.start,
+		end:   p.idx - 1,
+	})
+
+	p.state = stateContainerOpen
 }
 
 func (p *parser) containerOpen(b byte) {
