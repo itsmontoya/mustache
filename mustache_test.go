@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	hmust "github.com/hoisie/mustache"
+	"github.com/itsmontoya/mustache/profiling"
 )
 
 var (
@@ -13,21 +15,8 @@ var (
 	exampleSimpleStr            = "<div><p>Hello {{ name }}, {{ question }}?</p></div>"
 	exampleInjectionStr         = "<div>{{ injection }}</div>"
 	exampleApprovedInjectionStr = "<head>{{{approvedInjection}}}</head>"
-	exampleHTMLStr              = `
-<html>
-	<head>
-		<title>{{ title }}</title>
-	</head>
-	<body>
-		{{# basic }}
-		<ul>
-			{{# users }}<li>{{ greeting }} {{ name }}!</li>{{/ users }}
-		</ul>
-		{{/ basic }}
-	</body>
-</html>
-`
-	exampleLongStr = `
+	exampleArrayHTMLStr         = "<ul>{{# . }}<li>{{ greeting }} {{ name }}!</li>{{/ . }}</ul>{{^ . }}<div><p>Oh noes!</div></p>{{/ . }}"
+	exampleLongStr              = `
 	But I must explain to you {{ name }} how all this mistaken idea of denouncing pleasure and praising pain was born and I will give you a complete account of the system, and expound the actual teachings of the great explorer of the truth, the master-builder of human happiness. May I ask you, {{ question }}? No one rejects, dislikes, or avoids pleasure itself, because it is pleasure, but because those who do not know how to pursue pleasure rationally encounter consequences that are extremely painful.
 
 	I must say, {{ name }} Nor again is there anyone who loves or pursues or desires to obtain pain of itself, because it is pain, but because occasionally circumstances occur in which toil and pain can procure him some great pleasure. To take a trivial example, which of us ever undertakes laborious physical exercise, except to obtain some advantage from it?
@@ -39,7 +28,7 @@ var (
 	exampleSimple            = []byte(exampleSimpleStr)
 	exampleInjection         = []byte(exampleInjectionStr)
 	exampleApprovedInjection = []byte(exampleApprovedInjectionStr)
-	exampleHTML              = []byte(exampleHTMLStr)
+	exampleArrayHTML         = []byte(exampleArrayHTMLStr)
 	exampleLong              = []byte(exampleLongStr)
 
 	expectedVerySimple        = "<div><p>Panda<p></div>"
@@ -48,275 +37,173 @@ var (
 	expectedInjectionB        = "<div>&#60;script src=&#34;badsite.com/injectionPage&#34;/&#62;</div>"
 	expectedApprovedInjection = "<head><script src=\"goodsite.com/apistuff\"/></head>"
 
-	m = map[string]string{
-		"name":              "Panda",
-		"question":          "how are you doing today",
-		"injection":         "<script src=\"badsite.com/injectionPage\"/>",
-		"approvedInjection": "<script src=\"goodsite.com/apistuff\"/>",
+	m = map[string][]byte{
+		"name":              []byte("Panda"),
+		"question":          []byte("how are you doing today"),
+		"injection":         []byte("<script src=\"badsite.com/injectionPage\"/>"),
+		"approvedInjection": []byte("<script src=\"goodsite.com/apistuff\"/>"),
 	}
 
 	//map[string]map[string]User{
 	dm = map[string]interface{}{
 		"title": "Hello world!",
 		"basic": map[string]interface{}{
-			"users": []Aficionado{
-				&User{"Hello", "Joe"},
-				&User{"Greetings", "David"},
-				&User{"What's up", "Derpson"},
-			},
+			"errMsg": "Oh gosh",
 		},
 	}
 
 	errInvalidOutput = errors.New("invalid output")
-)
 
-type Page struct {
-	Title string
-	Basic Basic
-}
-
-type Basic struct {
-	Users []*User
-}
-
-type User struct {
-	Greeting string
-	Name     string
-}
-
-func (u *User) MarshalMustache(p *parser) error {
-	p.ForEach(func(key string) (val interface{}) {
-		switch key {
-		case "greeting":
-			val = u.Greeting
-		case "name":
-			val = u.Name
-		}
-
-		return
-	})
-
-	return nil
-}
-
-var (
 	outputB   []byte
 	outputStr string
 )
 
-func TestBasic(t *testing.T) {
-	if err := testSuite(); err != nil {
-		t.Error(err)
+func test(tmpl []byte, d interface{}) (err error) {
+	var t *Template
+	if t, err = Parse(tmpl); err != nil {
+		fmt.Println("Parse error", err)
 		return
 	}
-}
 
-func TestHTML(t *testing.T) {
-	if err := parse(exampleHTML, dm, func(b []byte) {
-		outputB = b
+	if err = t.Render(d, func(b []byte) {
+		//	return
+		fmt.Println(string(b))
 	}); err != nil {
-		t.Error(err)
-		return
-	}
-
-	fmt.Println("What do we have here?", string(outputB))
-}
-
-func TestHoisie(t *testing.T) {
-	if err := testHoisieSuite(); err != nil {
-		t.Error(err)
-		return
-	}
-}
-
-func testSuite() (err error) {
-	var str string
-
-	if err = parse(exampleVerySimple, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
-	}
-
-	if str = string(outputB); str != expectedVerySimple {
-		return errInvalidOutput
-	}
-
-	if err = parse(exampleSimple, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
-	}
-
-	if str = string(outputB); str != expectedSimple {
-		return errInvalidOutput
-	}
-
-	if err = parse(exampleInjection, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
-	}
-
-	if str = string(outputB); str != expectedInjectionA && str != expectedInjectionB {
-		return errInvalidOutput
-	}
-
-	if err = parse(exampleApprovedInjection, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
-	}
-
-	if str = string(outputB); str != expectedApprovedInjection {
-		return errInvalidOutput
-	}
-
-	if err = parse(exampleHTML, dm, func(b []byte) {
-		outputB = b
-	}); err != nil {
+		fmt.Println("Render error")
 		return
 	}
 
 	return
 }
 
-func runSuite() (err error) {
-	if err = parse(exampleVerySimple, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
+func TestVerySimple(t *testing.T) {
+	if err := test(exampleVerySimple, m); err != nil {
+		t.Error(err)
 	}
+}
 
-	if err = parse(exampleSimple, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
+func TestSimple(t *testing.T) {
+	if err := test(exampleSimple, m); err != nil {
+		t.Error(err)
 	}
+}
 
-	if err = parse(exampleInjection, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
+func TestApprovedInjection(t *testing.T) {
+	if err := test(exampleApprovedInjection, m); err != nil {
+		t.Error(err)
 	}
+}
 
-	if err = parse(exampleApprovedInjection, m, func(b []byte) {
-		outputB = b
-	}); err != nil {
-		return
-	}
+func TestArrayHTML(t *testing.T) {
+	//if err := test(exampleArrayHTML, users); err != nil {
+	//	t.Error(err)
+	//}
+}
 
-	return
+func TestMissingArrayHTML(t *testing.T) {
+	//if err := test(exampleArrayHTML, nil); err != nil {
+	//	t.Error(err)
+	//}
 }
 
 func TestLong(t *testing.T) {
 	var err error
-	if err = parse(exampleLong, m, func(b []byte) {
+	if err = Render(exampleLong, m, func(b []byte) {
 		outputB = b
 	}); err != nil {
 		return
 	}
 }
 
-func runHoisieSuite() (err error) {
-	outputStr = hmust.Render(exampleVerySimpleStr, m)
-	outputStr = hmust.Render(exampleSimpleStr, m)
-	outputStr = hmust.Render(exampleInjectionStr, m)
-	outputStr = hmust.Render(exampleApprovedInjectionStr, m)
-
-	return
+func BenchmarkVerySimple(b *testing.B) {
+	benchmark(b, exampleVerySimple, m)
 }
 
-func testHoisieSuite() (err error) {
-	var str string
-	if str = hmust.Render(exampleVerySimpleStr, m); str != expectedVerySimple {
-		fmt.Println("No match?", str)
-		return errInvalidOutput
-	}
-
-	if str = hmust.Render(exampleSimpleStr, m); str != expectedSimple {
-		fmt.Println("No match?", str)
-
-		return errInvalidOutput
-	}
-
-	if str = hmust.Render(exampleInjectionStr, m); str != expectedInjectionA && str != expectedInjectionB {
-		fmt.Println("No match?", str)
-
-		return errInvalidOutput
-	}
-
-	if str = hmust.Render(exampleApprovedInjectionStr, m); str != expectedApprovedInjection {
-		fmt.Println("No match?", str)
-
-		return errInvalidOutput
-	}
-
-	return
+func BenchmarkSimple(b *testing.B) {
+	benchmark(b, exampleSimple, m)
 }
 
-func BenchmarkSuite(b *testing.B) {
-	var err error
-	for i := 0; i < b.N; i++ {
-		if err = runSuite(); err != nil {
-			b.Error(err)
-			return
-		}
-	}
-
-	b.ReportAllocs()
+func BenchmarkInjection(b *testing.B) {
+	benchmark(b, exampleInjection, m)
 }
 
-func BenchmarkHoisieSuite(b *testing.B) {
-	var err error
-	for i := 0; i < b.N; i++ {
-		if err = runHoisieSuite(); err != nil {
-			b.Error(err)
-			return
-		}
-	}
+func BenchmarkApprovedInjection(b *testing.B) {
+	benchmark(b, exampleApprovedInjection, m)
+}
 
-	b.ReportAllocs()
+func BenchmarkArrayHTML(b *testing.B) {
+	benchmark(b, exampleArrayHTML, users)
 }
 
 func BenchmarkLong(b *testing.B) {
-	var err error
+	benchmark(b, exampleLong, m)
+}
+
+func benchmark(b *testing.B, tgt []byte, data interface{}) {
+	b.StopTimer()
+	var (
+		tmpl *Template
+		err  error
+	)
+
+	if tmpl, err = Parse(tgt); err != nil {
+		b.Error(err)
+		return
+	}
+	b.StartTimer()
+
 	for i := 0; i < b.N; i++ {
-		if err = parse(exampleLong, m, func(b []byte) {
+		if err = tmpl.Render(data, func(b []byte) {
 			outputB = b
 		}); err != nil {
+			b.Error(err)
 			return
 		}
 	}
 
 	b.ReportAllocs()
+}
+
+func benchmarkHoisie(b *testing.B, tgt string, data interface{}) {
+	b.StopTimer()
+	var (
+		tmpl *hmust.Template
+		err  error
+	)
+
+	if tmpl, err = hmust.ParseString(tgt); err != nil {
+		b.Error(err)
+		return
+	}
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		outputStr = tmpl.Render(data)
+	}
+
+	b.ReportAllocs()
+}
+
+func BenchmarkHoisieVerySimple(b *testing.B) {
+	benchmarkHoisie(b, exampleVerySimpleStr, m)
+}
+
+func BenchmarkHoisieSimple(b *testing.B) {
+	benchmarkHoisie(b, exampleSimpleStr, m)
+}
+
+func BenchmarkHoisieInjection(b *testing.B) {
+	benchmarkHoisie(b, exampleInjectionStr, m)
+}
+
+func BenchmarkHoisieApprovedInjection(b *testing.B) {
+	benchmarkHoisie(b, exampleApprovedInjectionStr, m)
+}
+
+func BenchmarkHoisieArrayHTML(b *testing.B) {
+	benchmarkHoisie(b, exampleArrayHTMLStr, users)
 }
 
 func BenchmarkHoisieLong(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		outputStr = hmust.Render(exampleLongStr, m)
-	}
-
-	b.ReportAllocs()
-}
-
-func BenchmarkHTML(b *testing.B) {
-	var err error
-	for i := 0; i < b.N; i++ {
-		if err = parse(exampleHTML, dm, func(b []byte) {
-			outputB = b
-		}); err != nil {
-			return
-		}
-	}
-
-	b.ReportAllocs()
-}
-
-func BenchmarkHoisieHTML(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		outputStr = hmust.Render(exampleHTMLStr, dm)
-	}
-
-	b.ReportAllocs()
+	benchmarkHoisie(b, exampleLongStr, m)
 }
