@@ -19,3 +19,8 @@ type sectionToken struct {
 	key string
 	t   *Template
 }
+
+type invertedSectionToken struct {
+	key string
+	t   *Template
+}

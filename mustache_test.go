@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	hmust "github.com/hoisie/mustache"
+	"github.com/itsmontoya/mustache/profiling"
 )
 
 var (
@@ -13,23 +15,8 @@ var (
 	exampleSimpleStr            = "<div><p>Hello {{ name }}, {{ question }}?</p></div>"
 	exampleInjectionStr         = "<div>{{ injection }}</div>"
 	exampleApprovedInjectionStr = "<head>{{{approvedInjection}}}</head>"
-	exampleSimpleHTMLStr        = "<li>{{ greeting }} {{ name }}!</li>"
-	exampleArrayHTMLStr         = "{{# . }}<ul><li>{{ greeting }} {{ name }}!</li></ul>{{/ . }}"
-	exampleHTMLStr              = `
-<html>
-	<head>
-		<title>{{ title }}</title>
-	</head>
-	<body>
-		{{# basic }}
-		<ul>
-			{{# users }}<li>{{ greeting }} {{ name }}!</li>{{/ users }}
-		</ul>
-		{{/ basic }}
-	</body>
-</html>
-`
-	exampleLongStr = `
+	exampleArrayHTMLStr         = "<ul>{{# . }}<li>{{ greeting }} {{ name }}!</li>{{/ . }}</ul>{{^ . }}<div><p>Oh noes!</div></p>{{/ . }}"
+	exampleLongStr              = `
 	But I must explain to you {{ name }} how all this mistaken idea of denouncing pleasure and praising pain was born and I will give you a complete account of the system, and expound the actual teachings of the great explorer of the truth, the master-builder of human happiness. May I ask you, {{ question }}? No one rejects, dislikes, or avoids pleasure itself, because it is pleasure, but because those who do not know how to pursue pleasure rationally encounter consequences that are extremely painful.
 
 	I must say, {{ name }} Nor again is there anyone who loves or pursues or desires to obtain pain of itself, because it is pain, but because occasionally circumstances occur in which toil and pain can procure him some great pleasure. To take a trivial example, which of us ever undertakes laborious physical exercise, except to obtain some advantage from it?
@@ -41,9 +28,7 @@ var (
 	exampleSimple            = []byte(exampleSimpleStr)
 	exampleInjection         = []byte(exampleInjectionStr)
 	exampleApprovedInjection = []byte(exampleApprovedInjectionStr)
-	exampleSimpleHTML        = []byte(exampleSimpleHTMLStr)
 	exampleArrayHTML         = []byte(exampleArrayHTMLStr)
-	exampleHTML              = []byte(exampleHTMLStr)
 	exampleLong              = []byte(exampleLongStr)
 
 	expectedVerySimple        = "<div><p>Panda<p></div>"
@@ -59,52 +44,16 @@ var (
 		"approvedInjection": []byte("<script src=\"goodsite.com/apistuff\"/>"),
 	}
 
-	users = []Aficionado{
-		&User{"Hello", "Joe"},
-		&User{"Greetings", "David"},
-		&User{"What's up", "Derpson"},
-	}
-
 	//map[string]map[string]User{
 	dm = map[string]interface{}{
 		"title": "Hello world!",
 		"basic": map[string]interface{}{
-			"users": users,
+			"errMsg": "Oh gosh",
 		},
 	}
 
 	errInvalidOutput = errors.New("invalid output")
-)
 
-type Page struct {
-	Title string
-	Basic Basic
-}
-
-type Basic struct {
-	Users []*User
-}
-
-type User struct {
-	Greeting string
-	Name     string
-}
-
-func (u *User) MarshalMustache(r *Renderer) error {
-	r.ForEach(func(key string) (val interface{}) {
-		switch key {
-		case "greeting":
-			val = u.Greeting
-		case "name":
-			val = u.Name
-		}
-
-		return
-	})
-	return nil
-}
-
-var (
 	outputB   []byte
 	outputStr string
 )
@@ -117,7 +66,7 @@ func test(tmpl []byte, d interface{}) (err error) {
 	}
 
 	if err = t.Render(d, func(b []byte) {
-		//return
+		//	return
 		fmt.Println(string(b))
 	}); err != nil {
 		fmt.Println("Render error")
@@ -145,22 +94,16 @@ func TestApprovedInjection(t *testing.T) {
 	}
 }
 
-func TestSimpleHTML(t *testing.T) {
-	if err := test(exampleSimpleHTML, users[0]); err != nil {
-		t.Error(err)
-	}
-}
-
 func TestArrayHTML(t *testing.T) {
-	if err := test(exampleArrayHTML, users); err != nil {
-		t.Error(err)
-	}
+	//if err := test(exampleArrayHTML, users); err != nil {
+	//	t.Error(err)
+	//}
 }
 
-func TestHTML(t *testing.T) {
-	if err := test(exampleHTML, dm); err != nil {
-		t.Error(err)
-	}
+func TestMissingArrayHTML(t *testing.T) {
+	//if err := test(exampleArrayHTML, nil); err != nil {
+	//	t.Error(err)
+	//}
 }
 
 func TestLong(t *testing.T) {
@@ -188,16 +131,8 @@ func BenchmarkApprovedInjection(b *testing.B) {
 	benchmark(b, exampleApprovedInjection, m)
 }
 
-func BenchmarkSimpleHTML(b *testing.B) {
-	benchmark(b, exampleSimpleHTML, users[0])
-}
-
 func BenchmarkArrayHTML(b *testing.B) {
 	benchmark(b, exampleArrayHTML, users)
-}
-
-func BenchmarkHTML(b *testing.B) {
-	benchmark(b, exampleHTML, dm)
 }
 
 func BenchmarkLong(b *testing.B) {
@@ -265,16 +200,8 @@ func BenchmarkHoisieApprovedInjection(b *testing.B) {
 	benchmarkHoisie(b, exampleApprovedInjectionStr, m)
 }
 
-func BenchmarkHoisieSimpleHTML(b *testing.B) {
-	benchmarkHoisie(b, exampleSimpleHTMLStr, users[0])
-}
-
 func BenchmarkHoisieArrayHTML(b *testing.B) {
 	benchmarkHoisie(b, exampleArrayHTMLStr, users)
-}
-
-func BenchmarkHoisieHTML(b *testing.B) {
-	benchmarkHoisie(b, exampleHTMLStr, dm)
 }
 
 func BenchmarkHoisieLong(b *testing.B) {

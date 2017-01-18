@@ -1,19 +1,25 @@
 package mustache
 
 import (
+	"io"
+	"os"
+	"path"
+
 	"github.com/itsmontoya/buffer"
 	"github.com/missionMeteora/toolkit/errors"
 )
 
 const (
-	charLCurly  = '{'
-	charRCurly  = '}'
-	charPound   = '#'
-	charFSlash  = '/'
-	charSpace   = ' '
-	charNewline = '\n'
-	charTab     = '\t'
-	charPeriod  = '.'
+	charLCurly      = '{'
+	charRCurly      = '}'
+	charPound       = '#'
+	charFSlash      = '/'
+	charSpace       = ' '
+	charNewline     = '\n'
+	charTab         = '\t'
+	charPeriod      = '.'
+	charCarrot      = '^'
+	charGreaterThan = '>'
 
 	lwrCaseStart = 'a'
 	lwrCaseEnd   = 'z'
@@ -45,6 +51,17 @@ const (
 	stateSectionClosing
 	stateSectionClosed
 
+	stateInvertedSectionStart
+	stateInvertedSectionOpen
+	stateInvertedSectionEnd
+	stateInvertedSectionClosing
+	stateInvertedSectionClosed
+
+	stateTmplStart
+	stateTmplOpen
+	stateTmplEnd
+	stateTmplClosing
+
 	stateRootEnd
 
 	stateError
@@ -71,9 +88,9 @@ func Render(a, b, c interface{}) error {
 }
 
 // Parse will parse a byteslice template and return a mustache Template
-func Parse(tmpl []byte) (t *Template, err error) {
+func Parse(tmpl []byte, filePath string) (t *Template, err error) {
 	var tkns tokens
-	if tkns, err = parse(tmpl); err != nil {
+	if tkns, err = parse(tmpl, filePath); err != nil {
 		return
 	}
 
@@ -81,10 +98,11 @@ func Parse(tmpl []byte) (t *Template, err error) {
 	return
 }
 
-func parse(tmpl []byte) (tkns tokens, err error) {
+func parse(tmpl []byte, fp string) (tkns tokens, err error) {
 	p := parser{
 		kbuf: bp.Get(),
 		tmpl: tmpl,
+		fp:   fp,
 	}
 
 	if err = p.parse(); err != nil {
@@ -106,13 +124,14 @@ type parser struct {
 	kstart int
 
 	tkns tokens
+
+	fp string // Filepath
 }
 
 func (p *parser) parse() (err error) {
 	var v byte
 	for ; p.idx < len(p.tmpl); p.idx++ {
 		v = p.tmpl[p.idx]
-		//for p.idx, v = range p.tmpl {
 		switch p.state {
 		case stateRootStart:
 			p.rootStart(v)
@@ -148,6 +167,24 @@ func (p *parser) parse() (err error) {
 			p.sectionEnd(v)
 		case stateSectionClosing:
 			p.sectionClosing(v)
+
+		case stateInvertedSectionStart:
+			p.invertedSectionStart(v)
+		case stateInvertedSectionOpen:
+			p.invertedSectionOpen(v)
+		case stateInvertedSectionEnd:
+			p.invertedSectionEnd(v)
+		case stateInvertedSectionClosing:
+			p.invertedSectionClosing(v)
+
+		case stateTmplStart:
+			p.tmplStart(v)
+		case stateTmplOpen:
+			p.tmplOpen(v)
+		case stateTmplEnd:
+			p.tmplEnd(v)
+		case stateTmplClosing:
+			p.tmplClosing(v)
 
 		case stateRootEnd:
 			break
@@ -192,20 +229,25 @@ func (p *parser) containerStart(b byte) {
 	if b == charLCurly {
 		p.state = stateContainerOpen
 	} else {
-		p.state = stateError
+		p.state = stateRootStart
 	}
 }
 
 func (p *parser) containerOpen(b byte) {
 	switch {
 	case isWhiteSpace(b):
-	case isChar(b):
+	case isChar(b), b == charPeriod:
 		p.kstart = p.idx
 		p.state = stateValueOpen
 	case b == charLCurly:
 		p.state = stateUnescapedValueStart
 	case b == charPound:
 		p.state = stateSectionStart
+	case b == charCarrot:
+		p.state = stateInvertedSectionStart
+	case b == charGreaterThan:
+		p.state = stateTmplStart
+
 	default:
 		p.state = stateError
 	}
@@ -351,7 +393,7 @@ func (p *parser) sectionClosing(b byte) {
 		err error
 	)
 
-	if st, err = Parse(p.tmpl[p.idx : p.idx+ss]); err != nil {
+	if st, err = Parse(p.tmpl[p.idx:p.idx+ss], p.fp); err != nil {
 		p.state = stateError
 		return
 	}
@@ -368,11 +410,157 @@ func (p *parser) sectionClosing(b byte) {
 	p.state = stateRootStart
 }
 
+func (p *parser) invertedSectionStart(b byte) {
+	switch {
+	case isChar(b), b == charPeriod:
+		p.state = stateInvertedSectionOpen
+		p.kstart = p.idx
+	case isWhiteSpace(b):
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) invertedSectionOpen(b byte) {
+	switch {
+	case isChar(b):
+	case b == charPeriod:
+	case isWhiteSpace(b):
+		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
+		p.state = stateInvertedSectionEnd
+	case b == charRCurly:
+		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
+		p.state = stateInvertedSectionClosing
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) invertedSectionEnd(b byte) {
+	switch {
+	case b == charRCurly:
+		p.state = stateInvertedSectionClosing
+	case isWhiteSpace(b):
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) invertedSectionClosing(b byte) {
+	if b != charRCurly {
+		p.state = stateError
+		return
+	}
+
+	p.idx++
+	var ss, se int
+	if ss, se = findSectionEnd(p.tmpl[p.idx:]); se == -1 {
+		p.state = stateError
+		return
+	}
+
+	var (
+		st  *Template
+		err error
+	)
+
+	if st, err = Parse(p.tmpl[p.idx:p.idx+ss], p.fp); err != nil {
+		p.state = stateError
+		return
+	}
+
+	p.tkns = append(p.tkns, invertedSectionToken{
+		key: p.kbuf.String(),
+		t:   st,
+	})
+	p.idx += se
+
+	p.kbuf.Reset()
+	p.start = -1
+	p.kstart = -1
+	p.state = stateRootStart
+}
+
+func (p *parser) tmplStart(b byte) {
+	switch {
+	case isChar(b), b == charPeriod:
+		p.state = stateTmplOpen
+		p.kstart = p.idx
+	case isWhiteSpace(b):
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) tmplOpen(b byte) {
+	switch {
+	case isChar(b), b == charPeriod, b == charFSlash:
+	case isWhiteSpace(b):
+		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
+		p.state = stateTmplEnd
+	case b == charRCurly:
+		p.kbuf.Write(p.tmpl[p.kstart:p.idx])
+		p.state = stateTmplClosing
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) tmplEnd(b byte) {
+	switch {
+	case b == charRCurly:
+		p.state = stateTmplClosing
+	case isWhiteSpace(b):
+	default:
+		p.state = stateError
+	}
+}
+
+func (p *parser) tmplClosing(b byte) {
+	if b != charRCurly {
+		p.state = stateError
+		return
+	}
+
+	var (
+		f   *os.File
+		st  sectionToken
+		err error
+
+		buf = bp.Get() // We are not going to return this to the pool until we copy the bytes properly
+	)
+
+	if f, err = os.Open(path.Join(p.fp, p.kbuf.String())); err != nil {
+		p.state = stateError
+		goto END
+	}
+
+	io.Copy(buf, f)
+
+	st.key = "."
+	if st.t, err = Parse(buf.Bytes(), p.fp); err != nil {
+		p.state = stateError
+		goto END
+	}
+
+	p.tkns = append(p.tkns, st)
+
+END:
+	if f != nil {
+		f.Close()
+	}
+
+	p.kbuf.Reset()
+	p.start = -1
+	p.kstart = -1
+	p.state = stateRootStart
+}
+
 func findSectionEnd(in []byte) (start, i int) {
 	var (
 		b     byte
 		state uint8
-		level uint8
+		level uint8 = 1
 	)
 
 	for i, b = range in {
@@ -389,7 +577,7 @@ func findSectionEnd(in []byte) (start, i int) {
 				state = 0
 			}
 		case 2:
-			if b == charPound {
+			if b == charPound || b == charCarrot {
 				level++
 				state = 0
 			} else if b == charFSlash {
@@ -420,12 +608,13 @@ func findSectionEnd(in []byte) (start, i int) {
 				state = 0
 			}
 		case 6:
+			level--
+			state = 0
+
 			if level == 0 {
+				//	i++
 				return
 			}
-
-			state = 0
-			level--
 		}
 	}
 

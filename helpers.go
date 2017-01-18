@@ -2,14 +2,6 @@ package mustache
 
 import "strconv"
 
-func isChar(b byte) bool {
-	return (b >= lwrCaseStart && b <= lwrCaseEnd) || (b >= uprCaseStart && b <= uprCaseEnd)
-}
-
-func isWhiteSpace(b byte) bool {
-	return b == charSpace || b == charNewline || b == charTab
-}
-
 // Aficionado is someone who really appreciates the Mustache
 type Aficionado interface {
 	MarshalMustache(*Renderer) error
@@ -57,27 +49,69 @@ func (m BytesMap) Get(key string) (val interface{}) {
 	return m[key]
 }
 
-func getValueBytes(v interface{}) (b []byte, ok bool) {
+type Value struct {
+	v interface{}
+}
+
+func (val Value) MarshalMustache(r *Renderer) (err error) {
+	return r.ForEach(func(k string) (v interface{}) {
+		switch k {
+		case ".":
+			v = val.v
+		}
+		return
+	})
+}
+
+func getValueBytes(v interface{}) (b []byte, ok, invalid bool) {
 	ok = true
 	switch nv := v.(type) {
 	case []byte:
 		b = nv
 	case string:
 		b = []byte(nv)
+
 	case int64:
 		b = strconv.AppendInt(b, nv, 10)
+	case int32:
+		b = strconv.AppendInt(b, int64(nv), 10)
+	case int16:
+		b = strconv.AppendInt(b, int64(nv), 10)
+	case int8:
+		b = strconv.AppendInt(b, int64(nv), 10)
+	case int:
+		b = strconv.AppendInt(b, int64(nv), 10)
+
+	case uint64:
+		b = strconv.AppendUint(b, nv, 10)
+	case uint32:
+		b = strconv.AppendUint(b, uint64(nv), 10)
+	case uint16:
+		b = strconv.AppendUint(b, uint64(nv), 10)
+	case uint8:
+		b = strconv.AppendUint(b, uint64(nv), 10)
+	case uint:
+		b = strconv.AppendUint(b, uint64(nv), 10)
+
 	case float64:
 		b = strconv.AppendFloat(b, nv, 'f', -1, 64)
+	case float32:
+		b = strconv.AppendFloat(b, float64(nv), 'f', -1, 32)
+
 	case bool:
 		b = strconv.AppendBool(b, nv)
+	case nil:
+		ok = false
+
 	default:
 		ok = false
+		invalid = true
 	}
-	return
 
+	return
 }
 
-func getAficionado(pa Aficionado, v interface{}) (a Aficionado, ok bool) {
+func getAficionado(pa Aficionado, v interface{}) (a Aficionado, ok, invalid bool) {
 	ok = true
 	switch nv := v.(type) {
 	case Aficionado:
@@ -93,36 +127,237 @@ func getAficionado(pa Aficionado, v interface{}) (a Aficionado, ok bool) {
 	case map[string][]byte:
 		a = BytesMap(nv)
 
+	case nil:
+		ok = false
+
 	default:
 		ok = false
+		invalid = true
 	}
 
 	return
 }
 
-func getAficionados(pa Aficionado, v interface{}) (as []Aficionado, ok bool) {
+func getSection(pa Aficionado, v interface{}) (s section, ok, invalid bool) {
+	if v == nil {
+		return
+	}
+
 	var a Aficionado
-	if a, ok = getAficionado(pa, v); ok {
-		as = []Aficionado{a}
+	if a, ok, _ = getAficionado(pa, v); ok {
+		s = a
 		return
 	}
 
 	ok = true
 	switch nv := v.(type) {
 	case []Aficionado:
-		as = nv
+		s = nv
 	case []interface{}:
-		for _, i := range nv {
-			if a, ok = getAficionado(pa, i); !ok {
+		as := make([]Aficionado, len(nv))
+		for k, v := range nv {
+			if a, ok, invalid = getAficionado(pa, v); !ok || invalid {
 				return
 			}
 
-			as = append(as, a)
+			as[k] = a
 		}
+
+		s = as
+	case []byte:
+		s = ByteSlice(nv).Values()
+	case []string:
+		s = StringSlice(nv).Values()
+	case []int64:
+		s = Int64Slice(nv).Values()
+	case []int32:
+		s = Int32Slice(nv).Values()
+	case []int:
+		s = IntSlice(nv).Values()
+	case []float64:
+		s = Float64Slice(nv).Values()
+	case []float32:
+		s = Float32Slice(nv).Values()
+
+	case nil:
+		ok = false
 
 	default:
 		ok = false
+		invalid = true
 	}
 
 	return
+
+}
+
+type ByteSlice []byte
+
+func (s ByteSlice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type StringSlice []string
+
+func (s StringSlice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type Int64Slice []int64
+
+func (s Int64Slice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type Int32Slice []int32
+
+func (s Int32Slice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type IntSlice []int
+
+func (s IntSlice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type Float64Slice []float64
+
+func (s Float64Slice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+type Float32Slice []float32
+
+func (s Float32Slice) Values() (as []Aficionado) {
+	as = make([]Aficionado, len(s))
+	for k, v := range s {
+		as[k] = Value{v}
+	}
+
+	return
+}
+
+func getInvertedSection(pa Aficionado, v interface{}) (s section, ok, invalid bool) {
+	switch nv := v.(type) {
+	case bool:
+		if !nv {
+			ok = true
+			s = pa
+		}
+	case string:
+		if len(nv) == 0 {
+			ok = true
+			s = pa
+		}
+
+	case map[string]string:
+		if len(nv) == 0 {
+			ok = true
+			s = pa
+		}
+	case map[string]interface{}:
+		if len(nv) == 0 {
+			ok = true
+			s = pa
+		}
+	case map[string][]byte:
+		if len(nv) == 0 {
+			ok = true
+			s = pa
+		}
+
+	case []string:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []int64:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []int32:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []int:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []float64:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []float32:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []byte:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []interface{}:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+	case []Aficionado:
+		if len(nv) == 0 {
+			s = pa
+			ok = true
+		}
+
+	case Aficionado:
+	case nil:
+		ok = true
+
+	default:
+		invalid = true
+	}
+
+	return
+}
+
+func isChar(b byte) bool {
+	return (b >= lwrCaseStart && b <= lwrCaseEnd) || (b >= uprCaseStart && b <= uprCaseEnd)
+}
+
+func isWhiteSpace(b byte) bool {
+	return b == charSpace || b == charNewline || b == charTab
 }

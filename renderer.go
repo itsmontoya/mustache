@@ -37,8 +37,10 @@ func newRenderer(t *Template, a Aficionado) *Renderer {
 
 // Renderer helps render
 type Renderer struct {
-	t *Template
-	a Aficionado
+	t     *Template
+	a     Aficionado
+	as    []Aficionado
+	isSet bool
 
 	buf *buffer.Buffer
 	get func(string) interface{}
@@ -50,13 +52,15 @@ func (r *Renderer) render() (err error) {
 		case tmplToken:
 			r.buf.Write(r.t.tmpl[tt.start:tt.end])
 		case valToken:
-			if err = r.processValue(tt); err != nil {
-				return
-			}
+			err = r.processValue(tt)
 		case sectionToken:
-			if err = r.processSection(tt); err != nil {
-				return
-			}
+			err = r.processSection(tt)
+		case invertedSectionToken:
+			err = r.processInvertedSection(tt)
+		}
+
+		if err != nil {
+			break
 		}
 	}
 
@@ -64,43 +68,109 @@ func (r *Renderer) render() (err error) {
 }
 
 func (r *Renderer) processValue(tkn valToken) (err error) {
-	var (
-		b  []byte
-		ok bool
-	)
-
-	if b, ok = getValueBytes(r.get(tkn.key)); !ok {
-		return ErrUnsupportedType
-	} else if b == nil {
+	if r.a == nil {
 		return
 	}
 
-	if tkn.escape {
-		b = escapist.Escape(b)
+	if b, ok, invalid := getValueBytes(r.get(tkn.key)); invalid {
+		return ErrUnsupportedType
+	} else if !ok {
+		return
+	} else {
+		if tkn.escape {
+			b = escapist.Escape(b)
+		}
+
+		r.buf.Write(b)
 	}
 
-	r.buf.Write(b)
 	return
 }
 
 func (r *Renderer) processSection(tkn sectionToken) (err error) {
 	var (
-		as []Aficionado
-		ok bool
+		s       section
+		ok      bool
+		invalid bool
 	)
 
-	if tkn.key == "." {
-		as = []Aficionado{r.a}
-		goto LOOP
+	if r.as != nil {
+		if tkn.key == "." {
+			s = r.as
+		} else {
+			err = ErrUnsupportedType
+			return
+		}
+	} else {
+		var v interface{}
+		if tkn.key == "." {
+			v = r.a != nil
+		} else {
+			v = r.get(tkn.key)
+		}
+
+		if s, ok, invalid = getSection(r.a, v); invalid {
+			return ErrUnsupportedType
+		} else if !ok {
+			return
+		}
 	}
 
-	if as, ok = getAficionados(r.a, r.get(tkn.key)); !ok {
+	switch st := s.(type) {
+	case Aficionado:
+		err = tkn.t.render(st, r.buf)
+	case []Aficionado:
+		for _, a := range st {
+			err = tkn.t.render(a, r.buf)
+		}
+
+	case nil:
+
+	default:
+		err = ErrUnsupportedType
+	}
+
+	return
+}
+
+func (r *Renderer) processInvertedSection(tkn invertedSectionToken) (err error) {
+	var (
+		v       interface{}
+		s       section
+		ok      bool
+		invalid bool
+	)
+
+	if r.a != nil {
+		if tkn.key == "." {
+			v = r.a != nil
+		} else {
+			v = r.get(tkn.key)
+		}
+	} else {
+		if tkn.key != "." {
+			err = ErrUnsupportedType
+			return
+		}
+
+		v = r.as
+	}
+
+	if s, ok, invalid = getInvertedSection(r.a, v); invalid {
 		return ErrUnsupportedType
+	} else if !ok {
+		return
 	}
 
-LOOP:
-	if err = tkn.t.render(as, r.buf); err != nil {
-		return
+	switch st := s.(type) {
+	case Aficionado:
+		err = tkn.t.render(st, r.buf)
+	case []Aficionado, nil:
+		err = tkn.t.renderList(nil, r.buf)
+		//	case nil:
+
+	default:
+		err = ErrUnsupportedType
 	}
 
 	return
@@ -115,3 +185,5 @@ func (r *Renderer) ForEach(fn func(string) interface{}) (err error) {
 	r.get = fn
 	return r.render()
 }
+
+type section interface{}
